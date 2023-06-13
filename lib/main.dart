@@ -1,12 +1,12 @@
-import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
 import 'package:puppeteer/puppeteer.dart';
 
 import 'wpp/qrcode/text_to_qrcode.dart';
+import 'wpp/wpp_auth.dart';
 import 'wpp/wpp_client_desktop.dart';
 import 'wpp/wpp_connect.dart';
 import 'wpp/wpp_interface.dart';
@@ -18,6 +18,27 @@ class WhatsAppMetadata {
 }
 
 Browser? browser;
+
+Future<bool> _waitForInChat(WpClientInterface wpClient) async {
+  var inChat = await WppAuth(wpClient).isMainReady();
+  if (inChat) return true;
+  Completer<bool> completer = Completer();
+  late Timer timer;
+  WppAuth wppAuth = WppAuth(wpClient);
+  timer = Timer.periodic(const Duration(seconds: 1), (self) async {
+    if (self.tick > 60) {
+      timer.cancel();
+      if (!completer.isCompleted) completer.complete(false);
+    } else {
+      bool inChat = await wppAuth.isMainReady();
+      if (inChat && !completer.isCompleted) {
+        timer.cancel();
+        completer.complete(true);
+      }
+    }
+  });
+  return completer.future;
+}
 
 void main(List<String> args) async {
   late WpClientInterface wpClient;
@@ -51,27 +72,27 @@ void main(List<String> args) async {
 
     await WppConnect.init(wpClient);
 
-    final qrcode = await wpClient.getQrCode();
+    final authenticated = await WppAuth(wpClient).isAuthenticated();
+    if (!authenticated) {
+      final qrcode = await wpClient.getQrCode();
 
-    String? urlCode;
-    // ignore: unused_local_variable
-    Uint8List? imageBytes;
-    if (qrcode != null &&
-        qrcode.base64Image != null &&
-        qrcode.urlCode != null) {
-      try {
-        final base64Image =
-            qrcode.base64Image?.replaceFirst("data:image/png;base64,", "");
-        imageBytes = base64Decode(base64Image!);
-      } catch (e) {
-        print(e);
+      String? urlCode;
+      if (qrcode != null && qrcode.urlCode != null) {
+        urlCode = qrcode.urlCode;
       }
 
-      urlCode = qrcode.urlCode!;
+      final image = convertStringToQrCode(urlCode!);
+      print(image);
     }
 
-    final image = convertStringToQrCode(urlCode!);
-    print(image);
+    final inChat = await _waitForInChat(wpClient);
+
+    if (!inChat) {
+      print('Phone not connected');
+      throw 'Phone not connected';
+    }
+
+    print('All connected');
   } catch (err) {
     wpClient.dispose();
   }

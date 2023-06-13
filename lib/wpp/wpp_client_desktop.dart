@@ -125,7 +125,7 @@ class WpClientDesktop implements WpClientInterface {
     try {
       await page?.waitForFunction('''() => {
           return typeof window.WPP !== 'undefined' && window.WPP.isReady;
-      } ''', timeout: const Duration(seconds: 10));
+      } ''', timeout: const Duration(seconds: 60));
     } catch (e) {
       print(e);
     }
